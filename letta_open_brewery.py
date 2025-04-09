@@ -16,6 +16,27 @@ print("\n")
 # Generate unique suffixes for tool names
 unique_suffix = str(uuid.uuid4())[:8]
 
+# Use the "Perplexity" mcp server:
+# https://github.com/modelcontextprotocol/servers/tree/main/src/everything
+mcp_server_name = "everything"
+mcp_tool_name = "echo"
+
+# List all McpTool belonging to the "everything" mcp server.
+mcp_tools = client.tools.list_mcp_tools_by_server(
+    mcp_server_name=mcp_server_name,
+)
+
+# We can see that "echo" is one of the tools, but it's not
+# a letta tool that can be added to a client (it has no tool id).
+for tool in mcp_tools:
+    print(tool)
+
+# Create a Tool (with a tool id) using the server and tool names.
+mcp_tool = client.tools.add_mcp_tool(
+    mcp_server_name=mcp_server_name,
+    mcp_tool_name=mcp_tool_name
+)
+
 # System prompt for the brewery search agent
 system_prompt = """You are a helpful assistant that provides information about California breweries.
 
