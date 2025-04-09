@@ -1,6 +1,7 @@
 from letta_client import Letta
 import uuid
 import os
+from pathlib import Path
 
 # Connect to Letta
 client = Letta(base_url="http://localhost:8283")
@@ -151,5 +152,12 @@ agent = client.agents.create(
     embedding="letta/letta-free"
 )
 
+
+# Export your agent into a serialized schema object (which you can write to a file)
+schema = client.agents.export_agent_serialized(agent_id=agent.id)
+import json
+Path(f"{agent.id}.af").write_text(str(schema))
+
 print(f"Created Brewery agent with ID: {agent.id}")
+Path(".agent").write_text(agent.id)
 print("Agent created successfully!")

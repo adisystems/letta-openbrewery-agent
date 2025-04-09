@@ -1,10 +1,11 @@
 from letta_client import Letta
+from pathlib import Path
 
 # Connect to Letta
 client = Letta(base_url="http://localhost:8283")
 
 # Replace with your agent ID from the previous step
-agent_id = "agent-8babcd1e-0899-4a29-8d9b-664d09912e4f" # Example agent ID
+agent_id = Path(".agent").read_text() # Example agent ID
 
 # send a message to the agent
 response = client.agents.messages.create(
