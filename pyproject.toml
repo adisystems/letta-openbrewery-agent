@@ -27,4 +27,6 @@ dependencies = [
     "llama-index-embeddings-langchain>=0.2.1",
     "httpx>=0.28.1",
     "idna>=3.6",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.29.0"
 ]

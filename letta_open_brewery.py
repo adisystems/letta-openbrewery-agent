@@ -152,10 +152,10 @@ def ask_state_brewery_mcp(query: str) -> str:
         str: The answer returned from the MCP backend or an error message.
     \"\"\"
     try:
-        # Use Mac's actual IP address
+        # Connect to the locally running FastAPI MCP server
         response = requests.post(
-            "http://host.docker.internal:3000/call",  # Special Docker DNS for host machine
-            json={"input": query},  # Use "input" key as expected by the MCP server
+            "http://localhost:3000/invoke",  # Updated to match your working MCP endpoint
+            json={"input": query},  # The FastAPI server expects an 'input' key
             timeout=10
         )
         response.raise_for_status()
@@ -163,7 +163,7 @@ def ask_state_brewery_mcp(query: str) -> str:
         print("[MCP DEBUG] Response JSON:", data)
         
         # Extract the output from the MCP response
-        if "output" in data:  # Match the key from your Flask app's response
+        if "output" in data:
             return data["output"]
         elif "error" in data:
             return f"Sorry, something went wrong: {data['error']}"
