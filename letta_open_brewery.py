@@ -16,37 +16,23 @@ print("\n")
 # Generate unique suffixes for tool names
 unique_suffix = str(uuid.uuid4())[:8]
 
-# Use the "Perplexity" mcp server:
-# https://github.com/modelcontextprotocol/servers/tree/main/src/everything
-mcp_server_name = "everything"
-mcp_tool_name = "echo"
+# Enhanced system prompt for the brewery search agent
+system_prompt = """You are a helpful assistant that provides information about U.S. breweries.
 
-# List all McpTool belonging to the "everything" mcp server.
-mcp_tools = client.tools.list_mcp_tools_by_server(
-    mcp_server_name=mcp_server_name,
-)
+You can:
+- Provide a complete list of all breweries in California using the california_breweries tool
+- Answer questions about breweries in other U.S. states using the ask_state_brewery_mcp tool
+- Answer questions about total count, types, or top cities for breweries
 
-# We can see that "echo" is one of the tools, but it's not
-# a letta tool that can be added to a client (it has no tool id).
-for tool in mcp_tools:
-    print(tool)
+When responding:
+1. Be clear and organized
+2. ALWAYS use the appropriate tool when a user asks about breweries in a specific state
+3. For questions about California, use the california_breweries tool
+4. For questions about ANY OTHER state, use the ask_state_brewery_mcp tool
+5. Summarize the information in a user-friendly way
 
-# Create a Tool (with a tool id) using the server and tool names.
-mcp_tool = client.tools.add_mcp_tool(
-    mcp_server_name=mcp_server_name,
-    mcp_tool_name=mcp_tool_name
-)
-
-# System prompt for the brewery search agent
-system_prompt = """You are a helpful assistant that provides information about California breweries.
-
-You can tell users:
-- The complete list of all breweries in California
-- The total count of breweries
-- Details about each brewery including name, city, type, and website
-
-When providing information, present it in a clear and organized way.
-If asked about other states, explain that you specifically focus on California breweries.
+Example: If asked "How many breweries are in Texas?", use the ask_state_brewery_mcp tool and pass the entire question as the query parameter.
+When you get information from a tool, always use the send_message tool to show the information to the user.
 """
 
 # Create the brewery search tool with source code
@@ -57,46 +43,39 @@ import json
 def california_breweries(request_heartbeat: bool = False) -> str:
     \"\"\"
     Get a complete list and count of all breweries in California.
-    
+
     Args:
         request_heartbeat: Request an immediate heartbeat after function execution
-    
+
     Returns:
         JSON string containing all brewery information
     \"\"\"
-    # Base URL for the OpenBreweryDB API
     base_url = "https://api.openbrewerydb.org/v1/breweries"
-    
-    # Set parameters for California
     params = {
         'by_state': 'california',
-        'per_page': 200  # Get maximum results per page
+        'per_page': 200
     }
-    
+
     try:
         all_breweries = []
         page = 1
-        
-        # Fetch all pages
         while True:
             params['page'] = page
             response = requests.get(base_url, params=params)
             response.raise_for_status()
             breweries = response.json()
-            
             if not breweries:
                 break
-                
             all_breweries.extend(breweries)
             page += 1
+            if page > 20:
+                break
 
-        # Count breweries by type
         type_counts = {}
         for brewery in all_breweries:
             brewery_type = brewery.get('brewery_type', 'unknown')
             type_counts[brewery_type] = type_counts.get(brewery_type, 0) + 1
 
-        # Format all breweries
         formatted_breweries = [
             {
                 "name": b.get("name"),
@@ -116,14 +95,14 @@ def california_breweries(request_heartbeat: bool = False) -> str:
             "type_breakdown": type_counts,
             "breweries": formatted_breweries
         }, indent=2)
-        
+
     except requests.exceptions.RequestException as e:
         return json.dumps({
             "error": f"Failed to fetch brewery data: {str(e)}"
         })
 """
 
-# Define the tool name and schema
+# Define the tool name and schema for California breweries
 tool_schema = {
     "name": "california_breweries",
     "description": "Get a complete list and count of all breweries in California.",
@@ -132,25 +111,20 @@ tool_schema = {
         "properties": {
             "request_heartbeat": {
                 "type": "boolean",
-                "description": "Request an immediate heartbeat after function execution. Set to `True` if you want to send a follow-up message or run a follow-up function."
+                "description": "Request an immediate heartbeat after function execution."
             }
         },
-        "required": ["request_heartbeat"]
+        "required": []  # Making request_heartbeat optional
     }
 }
 
-# List all tools and look for an existing brewery tool
 print("Checking for existing California breweries tool...")
 all_tools = client.tools.list()
-brewery_tool = None
+brewery_tool = next((t for t in all_tools if t.name == "california_breweries"), None)
 
-for tool in all_tools:
-    if tool.name == "california_breweries":
-        brewery_tool = tool
-        print(f"Found existing brewery tool with ID: {tool.id}")
-        break
-
-if brewery_tool is None:
+if brewery_tool:
+    print(f"Found existing brewery tool with ID: {brewery_tool.id}")
+else:
     print("No existing California breweries tool found. Creating new one...")
     brewery_tool = client.tools.create(
         source_code=brewery_search_code,
@@ -161,24 +135,105 @@ if brewery_tool is None:
     )
     print(f"Created California breweries tool with ID: {brewery_tool.id}")
 
+# MCP tool 
+print("Checking for existing MCP tool...")
 
-# Create the agent with required memory_blocks and LLM configuration
+mcp_tool_code = """
+import requests
+
+def ask_state_brewery_mcp(query: str) -> str:
+    \"\"\"
+    Queries the MCP server to retrieve brewery-related information for a specific state.
+
+    Args:
+        query (str): The user's natural language query (e.g., "How many breweries are in Texas?")
+
+    Returns:
+        str: The answer returned from the MCP backend or an error message.
+    \"\"\"
+    try:
+        # Use Mac's actual IP address
+        response = requests.post(
+            "http://host.docker.internal:3000/call",  # Special Docker DNS for host machine
+            json={"input": query},  # Use "input" key as expected by the MCP server
+            timeout=10
+        )
+        response.raise_for_status()
+        data = response.json()
+        print("[MCP DEBUG] Response JSON:", data)
+        
+        # Extract the output from the MCP response
+        if "output" in data:  # Match the key from your Flask app's response
+            return data["output"]
+        elif "error" in data:
+            return f"Sorry, something went wrong: {data['error']}"
+        else:
+            return "Sorry, I couldn't find an answer. Unexpected response format."
+    except Exception as e:
+        print(f"[MCP ERROR] {str(e)}")
+        return f"Sorry, I encountered an issue while fetching brewery data. Error: {str(e)}"
+"""
+
+
+mcp_tool_schema = {
+    "name": "ask_state_brewery_mcp",
+    "description": "Answer questions about breweries in any U.S. state using the MCP backend.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "User's question about breweries in a specific U.S. state (e.g., 'How many breweries are in Texas?')"
+            }
+        },
+        "required": ["query"]
+    }
+}
+
+mcp_tool = next((t for t in all_tools if t.name == "ask_state_brewery_mcp"), None)
+
+if mcp_tool:
+    print(f"Found existing state MCP tool with ID: {mcp_tool.id}")
+    # Since there's no update method, we'll delete the existing tool and create a new one
+    print(f"Deleting existing MCP tool to recreate it with updated code...")
+    try:
+        client.tools.delete(mcp_tool.id)
+        print(f"Successfully deleted old MCP tool")
+        mcp_tool = None
+    except Exception as e:
+        print(f"Warning: Failed to delete existing MCP tool: {e}")
+        print("Will create a new tool with a different name")
+        unique_mcp_suffix = str(uuid.uuid4())[:8]
+        mcp_tool_schema["name"] = f"ask_state_brewery_mcp_{unique_mcp_suffix}"
+
+# Create a new MCP tool
+if mcp_tool is None:
+    print("Creating a new MCP tool...")
+    mcp_tool = client.tools.create(
+        source_code=mcp_tool_code,
+        description="Answer state-level brewery questions using MCP",
+        source_type="python",
+        tags=["brewery", "state", "mcp"],
+        json_schema=mcp_tool_schema
+    )
+    print(f"Created new MCP tool with ID: {mcp_tool.id}")
+
+# Create agent with a new ID every time to avoid conflicts
 agent = client.agents.create(
-    name=f"california_brewery_assistant_{unique_suffix}",
-    description="An assistant that provides information about California breweries",
+    name=f"brewery_assistant_{unique_suffix}",
+    description="An assistant that provides brewery info across U.S. states",
     system=system_prompt,
     memory_blocks=[],
-    tools=["california_breweries"],
+    tools=[tool_schema["name"], mcp_tool_schema["name"]],  # Use the schema names in case we renamed
     model="letta/letta-free",
     embedding="letta/letta-free"
 )
 
-
-# Export your agent into a serialized schema object (which you can write to a file)
+# Export the agent schema
 schema = client.agents.export_agent_serialized(agent_id=agent.id)
-import json
 Path(f"{agent.id}.af").write_text(str(schema))
-
-print(f"Created Brewery agent with ID: {agent.id}")
 Path(".agent").write_text(agent.id)
+print(f"Created Brewery agent with ID: {agent.id}")
 print("Agent created successfully!")
+print("\nTo test this agent, visit your Letta UI and look for the agent named:")
+print(f"brewery_assistant_{unique_suffix}")
